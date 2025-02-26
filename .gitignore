@@ -1,0 +1,7 @@
+venv/
+.idea/
+misc/
+utilities/todolist
+utilities/.env
+utilities/__pycache__/
+*.db

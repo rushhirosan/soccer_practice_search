@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>サッカートレーニング検索サイト</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <header>
+        <h3>サッカートレーニング検索サイト Beta</h3>
+    </header>
+    <div class="tab-container">
+        <!-- タブメニュー -->
+        <div class="tabs">
+            <button class="tab-button active" data-tab="tab1">トレーニング検索 ⚽</button>
+            <button class="tab-button" data-tab="tab2">このサイトについて 📄</button>
+        </div>
+        <!-- タブの内容 -->
+        <div class="tab-content">
+            <div id="tab1" class="tab-panel active">
+            <!-- tab1コンテンツ -->
+                <div class="content-wrapper">
+                    <!-- サイドペイン -->
+                    <div class="search-container">
+                        <h3>検索ワード</h3>
+                        <input type="text" id="search-input" placeholder="キーワードで検索">
+                        <h3>選択</h3>
+                        <select id="type-input">
+                            <option value="">目的を選択</option>
+                        </select>
+                        <select id="players-input">
+                            <option value="">人数を選択</option>
+                        </select>
+                        <select id="level-input">
+                            <option value="">レベルを選択</option>
+                        </select>
+                        <select id="channel-input">
+                            <option value="">チャネルを選択</option>
+                        </select>
+                        <script src="scripts.js"></script>
+                        <h3>並び替え/表示数</h3>
+                        <select id="sort-input">
+                            <option value="upload_date">アップロード日</option>
+                            <option value="view_count">再生回数</option>
+                            <option value="like_count">いいね数</option>
+                        </select>
+                        <select id="limit-input">
+                            <option value="">制限なし</option>
+                            {% for i in range(1, 11) %}
+                                <option value="{{ i }}">{{ i }}</option>
+                            {% endfor %}
+                        </select>
+                        <button onclick="search()">検索</button>
+                    </div>
+                    <!-- メインコンテンツ -->
+                    <div class="main-content">
+                        <div id="search-prompt" class="search-prompt">
+                            左の検索ボタンで条件を指定してサッカーのトレーニングを検索してみてください。</div>
+                        <div class="card-container">
+                            <!-- カードがここに表示される -->
+                        </div>
+                    </div>
+                    <div class="pagination">
+                        <div id="video-count">表示中: 0 / 0 件</div>
+                        <button onclick="goToPage(currentPage - 1)" id="prev-page" disabled>前へ</button>
+                        <span id="page-info">ページ <span id="current-page">1</span></span>
+                        <button onclick="goToPage(currentPage + 1)" id="next-page">次へ</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+            <div id="tab2" class="tab-panel">
+                <!-- tab2 の内容 -->
+                <div class="split-container">
+                    <!-- 左半分: フォーム -->
+                    <div class="left-half">
+                        <p>こんにちは。このサイトはサッカートレーニングを検索するサイトです。</p>
+                        <p>サイト作成者自信が小学生のサッカーコーチをしていますが、
+                            練習メニューに困った時や他のチーム・配信者の練習メニューを参考にしたいと思い検索用途で作りました。
+                            </p>
+                        <p>参考にしているチャネルは⇨の通りです。</p>
+                        <p>ご意見・ご要望・ご感想等々以下のフォームから送信ください。</p>
+                        <div class="feedback-form">
+                            <form id="feedbackForm">
+                                <label for="name">名前（任意）:</label>
+                                <input type="text" id="name" name="name" placeholder="お名前">
+                                <label for="email">メールアドレス（任意）:</label>
+                                <input type="email" id="email" name="email" placeholder="example@example.com">
+                                <label for="category">カテゴリ:</label>
+                                <select id="category" name="category">
+                                    <option value="general">一般的な意見</option>
+                                    <option value="bug">バグ報告</option>
+                                    <option value="suggestion">改善提案</option>
+                                </select>
+                                <label for="message">ご意見:</label>
+                                <textarea id="message" name="message" rows="5" placeholder="ここにご意見を入力してください" required></textarea>
+                                <button type="submit">送信</button>
+                            </form>
+                            <p id="responseMessage" class="hidden">ご意見ありがとうございます！</p>
+                        </div>
+                    </div>
+
+                    <!-- 右半分: テキスト -->
+                    <div class="right-half">
+                        <p>参考にしているチャネルは以下です。</p>
+                        <ul></ul>
+                    </div>
+                </div>
+            </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='scripts.js') }}"></script>
+</body>
+</html>
