@@ -300,14 +300,14 @@ def search_term_in_table(table, term):
 #     return duplicates
 
 
-if __name__ == '__main__':
-#     # USAGE
-#     #delete_table("feedback")
-#     create_base_table()
-#     create_feedback_table()
-#     insert_contents_data()
-    #search_db()
-    search_content_table()
+# if __name__ == '__main__':
+# #     # USAGE
+# #     #delete_table("feedback")
+# #     create_base_table()
+# #     create_feedback_table()
+# #     insert_contents_data()
+#     #search_db()
+#     search_content_table()
 #     #insert_category_data()
 #     # search_term = 'ドリブル'
 #     # contents = search_table(search_term)
