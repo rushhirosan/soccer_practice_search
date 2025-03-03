@@ -23,8 +23,6 @@ if __name__ == '__main__':
     #     logger.info(cid + "is finished well.")
     #########################################################
 
-    # @イースリーショップ
-
     #########################################################
     ## cid table setup
     #########################################################
@@ -34,9 +32,10 @@ if __name__ == '__main__':
     get_db_connection()
     api_key = os.getenv('API_KEY')
 
-    # if not api_key:
-    #     logger.error("API key is missing. Please set it in the .env file.")
-    #     sys.exit(1)
+    if not api_key:
+        logger.error("API key is missing. Please set it in the .env file.")
+        sys.exit(1)
+
     # if len(sys.argv) < 2:
     #     logger.error("Please provide a YouTube channel name as a command-line argument.")
     #     sys.exit(1)

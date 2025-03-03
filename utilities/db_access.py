@@ -1,15 +1,30 @@
 import sqlite3
+import psycopg2
 import logging
-from contextlib import closing
 import pandas as pd
+import os
+from contextlib import closing
 from collections import defaultdict
+from dotenv import load_dotenv
 
 # データベースに接続し、コンテキストマネージャを使って自動で接続を閉じる
-DATABASE_PATH = './soccer_content.db'
+#DATABASE_PATH = './soccer_content.db'
 #file_path = "../misc/youtube_video_data.csv"
 
 # TABLES
 # contents, category, feedback, cid
+
+# TO .env
+load_dotenv()
+
+# データベース接続情報を環境変数から取得
+DATABASE_CONFIG = {
+    'dbname': os.getenv('DB_NAME'),
+    'user': os.getenv('DB_USER'),
+    'password': os.getenv('DB_PASSWORD'),
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'port': os.getenv('DB_PORT', '5432'),
+}
 
 # ロガーの設定
 logging.basicConfig(
@@ -25,7 +40,8 @@ logger = logging.getLogger(__name__)
 def get_db_connection():
     """データベース接続を取得"""
     logger.info("Establishing database connection...")
-    return sqlite3.connect(DATABASE_PATH)
+    return psycopg2.connect(**DATABASE_CONFIG)
+    #return sqlite3.connect(DATABASE_PATH)
 
 
 def delete_table(tbl_name: str):
@@ -38,7 +54,7 @@ def delete_table(tbl_name: str):
             c.execute(f'DROP TABLE IF EXISTS {tbl_name}')
             conn.commit()
             logger.info(f"{tbl_name} table deleted successfully.")
-        except sqlite3.Error as e:
+        except psycopg2.Error as e:
             logger.error("Error while deleting table: %s", e)
 
 
@@ -51,7 +67,7 @@ def create_table(query: str):
             c.execute(query)
             conn.commit()
             logger.info("Table created successfully.")
-        except sqlite3.Error as e:
+        except psycopg2.Error as e: # sqlite3.Error < for sqlite
             logger.error("Error while creating table: %s", e)
 
 
@@ -60,13 +76,14 @@ def create_cid_table():
     logger.info("Creating 'cid' table...")
     query = '''
         CREATE TABLE IF NOT EXISTS cid (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             cid TEXT UNIQUE,
             cname TEXT,
             clink TEXT
         )
     '''
     create_table(query)
+    # id INTEGER PRIMARY KEY AUTOINCREMENT, <- for sqlite
 
 
 def create_contents_table():
@@ -108,7 +125,7 @@ def create_feedback_table():
     logger.info("Creating 'feedback' table...")
     query = '''
         CREATE TABLE IF NOT EXISTS feedback (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT,
             email TEXT,
             category TEXT,
@@ -117,6 +134,7 @@ def create_feedback_table():
         )
     '''
     create_table(query)
+    # id INTEGER PRIMARY KEY AUTOINCREMENT, < for sqlite
 
 
 def insert_cid_data(cid: str, cname: str, clink: str):
@@ -126,14 +144,20 @@ def insert_cid_data(cid: str, cname: str, clink: str):
         c = conn.cursor()
         try:
             c.execute('''
-                INSERT OR IGNORE INTO cid (cid, cname, clink)
-                VALUES (?, ?, ?)
+                INSERT INTO cid (cid, cname, clink)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (cid) DO NOTHING
             ''', (cid, cname, clink))
             conn.commit()
             logger.info("Data inserted into 'cid' table successfully.")
-        except sqlite3.Error as e:
+        except psycopg2.Error as e:
             logger.error("Error while inserting data into 'cid' table: %s", e)
-
+        # for sqlite, use
+        # ? and
+        # c.execute('''
+        #  INSERT OR IGNORE INTO cid (cid, cname, clink)
+        #  VALUES (%s, %s, %s)
+        #  ''', (cid, cname, clink))
 
 def insert_category_data(contents_data, channel_category):
     """`category`テーブルにデータを挿入"""
@@ -143,12 +167,12 @@ def insert_category_data(contents_data, channel_category):
         try:
             for data in contents_data:
                 c.execute('''
-                    INSERT OR IGNORE INTO category (ID, category_title, players, level, channel_brand_category)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO category (ID, category_title, players, level, channel_brand_category)
+                    VALUES (%s, %s, %s, %s, %s) ON CONFLICT (ID) DO NOTHING
                 ''', (data["id"], data["category"], data["nop"], data["level"], channel_category))
                 conn.commit()
             logger.info("Data inserted into 'category' table successfully.")
-        except sqlite3.Error as e:
+        except psycopg2.Error as e:
             logger.error("Error while inserting data into 'category' table: %s", e)
 
 
@@ -172,13 +196,13 @@ def insert_contents_data(video_data, channel_category):
         try:
             for data in video_data:
                 c.execute('''
-                    INSERT OR IGNORE INTO contents (id, title, upload_date, video_url, 
+                    INSERT INTO contents (id, title, upload_date, video_url, 
                     view_count, like_count, duration, channel_category)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (id) DO NOTHING
                 ''', (data['id'], data['title'], data['upload_date'], data['url'],
                       data['view_count'], data['like_count'], data['duration'], channel_category))
                 logger.info("Inserted data for video ID: %s", data['id'])
-        except sqlite3.Error as e:
+        except psycopg2.Error as e:
             logger.error("Error while inserting data for ID %s: %s", data['id'], e)
         conn.commit()
         logger.info("All data inserted successfully into 'contents' table.")
@@ -191,7 +215,7 @@ def insert_contents_data(video_data, channel_category):
         # try:
         #     c.execute('''
         #         INSERT OR IGNORE INTO contents (ID, title, upload_date, video_url, view_count, like_count, duration)
-        #         VALUES (?, ?, ?, ?, ?, ?, ?)
+        #         VALUES (%s, %s, %s, %s, %s, %s, %s)
         #     ''', (row['ID'], row['Title'], row['Upload Date'], row['Video URL'],
         #           row['View Count'], row['Like Count'], row['Duration']))
         #     logger.info("Inserted data for video ID: %s", row['ID'])
@@ -230,7 +254,7 @@ def get_channel_name_from_id(id):
     """ 指定した ID のチャンネル名を取得 """
     with closing(get_db_connection()) as conn:
         c = conn.cursor()
-        query = 'SELECT cname FROM cid WHERE id = ?'  # プレースホルダーを使用
+        query = 'SELECT cname FROM cid WHERE id = %s'  # プレースホルダーを使用
         c.execute(query, (id,))  # タプルで値を渡す
         result = c.fetchone()  # 1行のみ取得
         return result[0] if result else None  # データがあれば返す、なければ None
@@ -241,15 +265,20 @@ def search_db():
     logger.info("Fetching list of tables in the database...")
     with closing(get_db_connection()) as conn:
         c = conn.cursor()
-        c.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        c.execute("""
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+        """)
         tables = c.fetchall()
         table_names = [table[0] for table in tables]
         logger.info("Tables found: %s", table_names)
-        print("テーブル一覧:", table_names)
+        #print("テーブル一覧:", table_names)
 
 
 def search_term_in_table(table, term):
     """`table`テーブルの`term`を検索"""
+    pass
     # logger.info("Searching data in 'contents' table...")
     # with closing(get_db_connection()) as conn:
     #     c = conn.cursor()
@@ -271,12 +300,14 @@ def search_term_in_table(table, term):
 #     return duplicates
 
 
-# if __name__ == '__main__':
+if __name__ == '__main__':
 #     # USAGE
 #     #delete_table("feedback")
 #     create_base_table()
 #     create_feedback_table()
 #     insert_contents_data()
+    #search_db()
+    search_content_table()
 #     #insert_category_data()
 #     # search_term = 'ドリブル'
 #     # contents = search_table(search_term)
