@@ -21,13 +21,19 @@ import os
 load_dotenv()
 
 # データベース接続情報を環境変数から取得
-DATABASE_CONFIG = {
-    'dbname': os.getenv('DB_NAME'),
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD'),
-    'host': os.getenv('DB_HOST'),
-    'port': os.getenv('DB_PORT', '5432'),
-}
+# DATABASE_CONFIG = {
+#     'dbname': os.getenv('DB_NAME'),
+#     'user': os.getenv('DB_USER'),
+#     'password': os.getenv('DB_PASSWORD'),
+#     'host': os.getenv('DB_HOST'),
+#     'port': os.getenv('DB_PORT', '5432'),
+# }
+
+
+DATABASE_URL = os.getenv('DATABASE_URL')
+
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL is not set!")
 
 # ロガーの設定
 logging.basicConfig(
