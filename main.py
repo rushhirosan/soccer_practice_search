@@ -65,14 +65,18 @@ if __name__ == '__main__':
         insert_cid_data(cid, channel_name, channel_links[c_num-1])
         create_contents_table()
         video_data = get_youtube_video_data(cid, api_key)
+        # for data in video_data:
+        #     print(data)
+        #     print(data['id'], data['title'], data['upload_date'], data['url'],
+        #               data['view_count'], data['like_count'], data['duration'], c_num)
         insert_contents_data(video_data, c_num)
         #########################################################
         ## category setup
         #########################################################
-        create_category_table()
-        contents = search_content_table() # search table parameter not work
-        contents_data = update_category(contents)
-        insert_category_data(contents_data, c_num)
+        #create_category_table()
+        #contents = search_content_table() # search table parameter not work
+        #contents_data = update_category(contents)
+        #insert_category_data(contents_data, c_num)
 
 
 

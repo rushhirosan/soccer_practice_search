@@ -1,10 +1,12 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, g
 from datetime import datetime
-from utilities.db_access import get_channel_name_from_id
+from utilities.db_access import get_db_connection, pool, get_channel_name_from_id
+from contextlib import closing
 import os
 import sqlite3
 import unicodedata
 import logging
+import psycopg2
 
 
 # ロガーの設定
@@ -23,7 +25,7 @@ DATABASE = 'soccer_content.db'
 
 def convert_to_embed_url(video_url):
     """YouTubeの通常リンクからVIDEO_IDを抽出し、埋め込みリンクを生成する"""
-    logger.info(f"Converting video URL: {video_url}")
+    #logger.info(f"Converting video URL: {video_url}")
     if "watch?v=" in video_url:
         video_id = video_url.split("watch?v=")[-1]
         return f"https://www.youtube.com/embed/{video_id}"
@@ -34,8 +36,16 @@ def convert_activities(activities):
     """アクティビティリストのデータを変換する"""
     logger.info("Converting activities")
     result = []
+
+    column_names = [
+        "id", "title", "upload_date", "video_url", "view_count", 
+        "like_count", "duration", "channel_category"
+    ]  # カラム名を明示的に定義
+
     for activity in activities:
-        activity_dict = dict(activity)
+        # zip() を使ってタプルを辞書に変換
+        activity_dict = dict(zip(column_names, activity))
+
         dt = activity_dict["upload_date"].rstrip("Z")
         try:
             # 日本語形式（例: "2023年11月22日11時00分"）の場合
@@ -46,20 +56,15 @@ def convert_activities(activities):
             except ValueError:
                 logger.error(f"Unsupported date format: {dt}")
                 continue
+
         # 必要に応じてフォーマットを変換して保存
         activity_dict["upload_date"] = date_obj.strftime("%Y年%m月%d日%H時%M分")
         activity_dict["video_url"] = convert_to_embed_url(activity_dict["video_url"])
         activity_dict["channel_category"] = get_channel_name_from_id(activity_dict["channel_category"])
+
         result.append(activity_dict)
+
     return result
-
-
-def get_db_connection():
-    """データベース接続を取得する"""
-    logger.info("Connecting to database: %s", DATABASE)
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 
 def build_query_with_filters(base_query, filters, params):
@@ -162,8 +167,7 @@ def multi_search(conn, q, filters, sort, offset, limit):
 
 @app.route('/search')
 def search_activities():
-    conn = get_db_connection()
-
+    
     query = request.args.get('q', '')
     type_filter = request.args.get('type', '')
     players_filter = request.args.get('players', '')
@@ -180,31 +184,42 @@ def search_activities():
         'channel_filter': channel_filter
     }
 
-    if query:
-        if not any([type_filter, players_filter, level_filter, channel_filter]):
-            query = unicodedata.normalize('NFKC', query.strip())
-            total = conn.execute('''
-                SELECT count(*) FROM contents
-                WHERE title LIKE ?
-                COLLATE NOCASE
-            ''', ['%' + query + '%']).fetchone()[0]
+    conn = get_db_connection()
+    with closing(conn.cursor()) as c:  # ✅ カーソルのみ `closing` を使用
+        try:
+            if query:
+                if not any([type_filter, players_filter, level_filter, channel_filter]):
+                    query = unicodedata.normalize('NFKC', query.strip())
 
-            activities = conn.execute(f'''
-                SELECT * FROM contents
-                WHERE title LIKE ?
-                ORDER BY {sort} DESC
-                LIMIT ? OFFSET ?
-            ''', ['%' + query + '%', limit, offset]).fetchall()
-        else:
-            total = multi_search_total(conn, query, filters)
-            activities = multi_search(conn, query, filters, sort, offset, limit)
-    else:
-        total = multi_search_total(conn, query, filters)
-        activities = multi_search(conn, query, filters, sort, offset, limit)
+                    c.execute('''
+                        SELECT count(*) FROM contents
+                        WHERE title ILIKE %s
+                    ''', ('%' + query + '%',))  # ✅ `?` → `%s` に修正 (PostgreSQL 用)
 
-    conn.close()
+                    total = c.fetchone()[0]
+
+                    c.execute(f'''
+                        SELECT * FROM contents
+                        WHERE title ILIKE %s
+                        ORDER BY {sort} DESC
+                        LIMIT %s OFFSET %s
+                    ''', ('%' + query + '%', limit, offset))
+
+                    activities = c.fetchall()
+                else:
+                    total = multi_search_total(c, query, filters)
+                    activities = multi_search(c, query, filters, sort, offset, limit)
+            else:
+                total = multi_search_total(c, query, filters)
+                activities = multi_search(c, query, filters, sort, offset, limit)
+
+        except psycopg2.Error as e:
+            logger.error("Error while executing search query: %s", e)
+            return jsonify({"error": "Database error"}), 500  # HTTP 500 を返す
 
     current_display_count = len(activities) + offset
+
+    #conn.close()
 
     return jsonify({
         "activities": convert_activities(activities),
@@ -218,11 +233,12 @@ def save_feedback_to_db(feedback):
     logger.info(f"Saving feedback: {feedback}")
     conn = get_db_connection()
     try:
-        conn.execute(
-            'INSERT INTO feedback (name, email, category, message) VALUES (?, ?, ?, ?)',
-            (feedback['name'], feedback['email'], feedback['category'], feedback['message'])
-        )
-        conn.commit()
+        with conn.cursor() as c:
+            c.execute(
+                'INSERT INTO feedback (name, email, category, message) VALUES (%s, %s, %s, %s)',
+                (feedback['name'], feedback['email'], feedback['category'], feedback['message'])
+            )
+            conn.commit()
     except Exception as e:
         logger.error(f"Error saving feedback: {e}")
     finally:
@@ -310,6 +326,16 @@ def submit_feedback():
     save_feedback_to_db(feedback_details)
 
     return jsonify({'message': 'Feedback submitted successfully'}), 200
+
+
+@app.teardown_appcontext
+def close_db(error):
+    """リクエストが終わったら接続を閉じる"""
+    db = g.pop('db', None)
+    if db is not None:
+        #db.close()
+        pool.putconn(db)
+        logger.info("Closing database connection...")
 
 
 @app.route('/')

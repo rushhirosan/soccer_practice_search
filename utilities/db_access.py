@@ -1,11 +1,14 @@
+from contextlib import closing
+from collections import defaultdict
+from dotenv import load_dotenv
+from flask import g
+from psycopg2.pool import SimpleConnectionPool
+
 import sqlite3
 import psycopg2
 import logging
 import pandas as pd
 import os
-from contextlib import closing
-from collections import defaultdict
-from dotenv import load_dotenv
 
 # データベースに接続し、コンテキストマネージャを使って自動で接続を閉じる
 #DATABASE_PATH = './soccer_content.db'
@@ -37,11 +40,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+pool = SimpleConnectionPool(1, 10, **DATABASE_CONFIG)  # 最小1、最大10の接続プール
+
+
 def get_db_connection():
-    """データベース接続を取得"""
-    logger.info("Establishing database connection...")
-    return psycopg2.connect(**DATABASE_CONFIG)
-    #return sqlite3.connect(DATABASE_PATH)
+    """リクエストごとに同じ接続を再利用する"""
+    if "db" not in g:
+        g.db = pool.getconn()
+        logger.info("New database connection acquired")
+    return g.db
+
+
+# def get_db_connection():
+#     """データベース接続を取得"""
+#     logger.info("Establishing database connection...")
+#     return psycopg2.connect(**DATABASE_CONFIG)
+#     #return sqlite3.connect(DATABASE_PATH)
 
 
 def delete_table(tbl_name: str):
@@ -152,12 +166,7 @@ def insert_cid_data(cid: str, cname: str, clink: str):
             logger.info("Data inserted into 'cid' table successfully.")
         except psycopg2.Error as e:
             logger.error("Error while inserting data into 'cid' table: %s", e)
-        # for sqlite, use
-        # ? and
-        # c.execute('''
-        #  INSERT OR IGNORE INTO cid (cid, cname, clink)
-        #  VALUES (%s, %s, %s)
-        #  ''', (cid, cname, clink))
+
 
 def insert_category_data(contents_data, channel_category):
     """`category`テーブルにデータを挿入"""
@@ -191,34 +200,51 @@ def insert_contents_data(video_data, channel_category):
     #     else:
     #         logger.info("Processing stopped due to duplicate IDs.")
     #         return
-    with closing(get_db_connection()) as conn:
-        c = conn.cursor()
-        try:
-            for data in video_data:
-                c.execute('''
-                    INSERT INTO contents (id, title, upload_date, video_url, 
-                    view_count, like_count, duration, channel_category)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (id) DO NOTHING
-                ''', (data['id'], data['title'], data['upload_date'], data['url'],
-                      data['view_count'], data['like_count'], data['duration'], channel_category))
-                logger.info("Inserted data for video ID: %s", data['id'])
-        except psycopg2.Error as e:
-            logger.error("Error while inserting data for ID %s: %s", data['id'], e)
-        conn.commit()
-        logger.info("All data inserted successfully into 'contents' table.")
-        # for _, row in df.iterrows():
-        #     c.execute('SELECT 1 FROM contents WHERE ID = ?', (row['ID'],))
-        #     if c.fetchone():
-        #         logger.info("Skipping duplicate ID: %s", row['ID'])
-        #         continue
+    with closing(get_db_connection()) as conn:  # データベース接続
+        with closing(conn.cursor()) as c:  # カーソルのクローズを自動管理
+            try:
+                for data in video_data:
+                    # like_count の変換処理
+                    like_count = data.get('like_count')
+                    if like_count in ('N/A', None):
+                        like_count = None
+                    else:
+                        try:
+                            like_count = int(like_count)
+                        except ValueError:
+                            logger.warning("Invalid like_count value for ID %s: %s", data['id'], like_count)
+                            like_count = None  # 数値変換できない場合は None にする
 
-        # try:
-        #     c.execute('''
-        #         INSERT OR IGNORE INTO contents (ID, title, upload_date, video_url, view_count, like_count, duration)
-        #         VALUES (%s, %s, %s, %s, %s, %s, %s)
-        #     ''', (row['ID'], row['Title'], row['Upload Date'], row['Video URL'],
-        #           row['View Count'], row['Like Count'], row['Duration']))
-        #     logger.info("Inserted data for video ID: %s", row['ID'])
+                    # channel_category の存在チェック
+                    #channel_category = data.get('channel_category', None)  # デフォルト値を None に
+
+                    logger.info(
+                        "INSERTするデータ: %s, %s, %s, %s, %s, %s, %s, %s",
+                        data['id'], data['title'], data['upload_date'], data['url'],
+                        data['view_count'], like_count, data['duration'], channel_category
+                    )
+
+                    # データ挿入
+                    try:
+                        c.execute('''
+                            INSERT INTO contents (id, title, upload_date, video_url, 
+                            view_count, like_count, duration, channel_category)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s) 
+                            ON CONFLICT (id) DO NOTHING
+                        ''', (
+                            data['id'], data['title'], data['upload_date'], data['url'],
+                            data['view_count'], like_count, data['duration'], channel_category
+                        ))
+                    except psycopg2.Error as e:
+                        logger.error("Error while inserting data for ID %s: %s", data['id'], e)
+                        conn.rollback()  # エラー発生時にロールバック
+
+                conn.commit()  # すべての処理が成功したらコミット
+                logger.info("All data inserted successfully into 'contents' table.")
+
+            except Exception as e:
+                conn.rollback()  # 致命的なエラーが発生した場合にロールバック
+                logger.error("Unexpected error: %s", e)
 
 
 def search_content_table():
@@ -226,10 +252,12 @@ def search_content_table():
     logger.info("Searching data in 'contents' table...")
     with closing(get_db_connection()) as conn:
         c = conn.cursor()
-        query = 'SELECT * FROM contents'
+        query = 'SELECT * FROM contents LIMIT 5'
         c.execute(query)
+        #c.execute("SELECT * FROM contents WHERE id = %s;", ('B-uDfqk20ac',))
         results = c.fetchall()
         logger.info("Search completed. Found %d records.", len(results))
+        print(results)
         return [[result[0], result[1]] for result in results]
 
 # def search_table(search_term: str = None):
@@ -252,12 +280,15 @@ def search_content_table():
 
 def get_channel_name_from_id(id):
     """ 指定した ID のチャンネル名を取得 """
-    with closing(get_db_connection()) as conn:
-        c = conn.cursor()
-        query = 'SELECT cname FROM cid WHERE id = %s'  # プレースホルダーを使用
-        c.execute(query, (id,))  # タプルで値を渡す
-        result = c.fetchone()  # 1行のみ取得
-        return result[0] if result else None  # データがあれば返す、なければ None
+    conn = pool.getconn()  # コネクションプールから接続を取得
+    try:
+        with conn.cursor() as c:
+            query = 'SELECT cname FROM cid WHERE id = %s'  # プレースホルダーを使用
+            c.execute(query, (id,))  # タプルで値を渡す
+            result = c.fetchone()  # 1行のみ取得
+            return result[0] if result else None  # データがあれば返す、なければ None
+    finally:
+        pool.putconn(conn)  # 使用後に接続をプールに戻す
 
 
 def search_db():
@@ -300,14 +331,16 @@ def search_term_in_table(table, term):
 #     return duplicates
 
 
-# if __name__ == '__main__':
-# #     # USAGE
-# #     #delete_table("feedback")
+if __name__ == '__main__':
+#     delete_table("cid")
+#     search_db()
+    print(search_content_table())
+
 # #     create_base_table()
 # #     create_feedback_table()
 # #     insert_contents_data()
-#     #search_db()
-#     search_content_table()
+    
+    #
 #     #insert_category_data()
 #     # search_term = 'ドリブル'
 #     # contents = search_table(search_term)
