@@ -46,8 +46,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-pool = SimpleConnectionPool(1, 10, **DATABASE_CONFIG)  # 最小1、最大10の接続プール
+#pool = SimpleConnectionPool(1, 10, **DATABASE_CONFIG)  # 最小1、最大10の接続プール
 
+pool = SimpleConnectionPool(1, 10, dns=DATABASE_URL)  # 最小1、最大10の接続プール
 
 def get_db_connection():
     """リクエストごとに同じ接続を再利用する"""
