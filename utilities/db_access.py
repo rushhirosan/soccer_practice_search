@@ -3,6 +3,8 @@ from collections import defaultdict
 from dotenv import load_dotenv
 from flask import g
 from psycopg2.pool import SimpleConnectionPool
+from contextlib import contextmanager
+
 
 import sqlite3
 import psycopg2
@@ -52,11 +54,26 @@ pool = SimpleConnectionPool(1, 10, dsn=DATABASE_URL)  # 最小1、最大10の接
 
 def get_db_connection():
     """リクエストごとに同じ接続を再利用する"""
-    if "db" not in g:
+    if "db" not in g or g.db.closed:
+        if "db" in g:
+            logger.warning("Stale database connection found. Reacquiring...")
+            pool.putconn(g.pop("db"))  # 古い接続をプールに返却
         g.db = pool.getconn()
         logger.info("New database connection acquired")
     return g.db
 
+
+
+@contextmanager
+def use_db_connection():
+    """接続の管理を安全に行うコンテキストマネージャ"""
+    conn = get_db_connection()
+    try:
+        yield conn
+    finally:
+        if "db" in g:
+            pool.putconn(g.pop("db"))  # 使い終わったらプールに返却
+            logger.info("Database connection returned to pool")
 
 # def get_db_connection():
 #     """データベース接続を取得"""
@@ -71,8 +88,7 @@ def delete_table(tbl_name: str):
     with closing(get_db_connection()) as conn:
         c = conn.cursor()
         try:
-            c.execute(f"DELETE FROM {tbl_name};")
-            c.execute(f'DROP TABLE IF EXISTS {tbl_name}')
+            c.execute(f"DROP TABLE IF EXISTS {tbl_name} CASCADE")
             conn.commit()
             logger.info(f"{tbl_name} table deleted successfully.")
         except psycopg2.Error as e:
@@ -161,18 +177,18 @@ def create_feedback_table():
 def insert_cid_data(cid: str, cname: str, clink: str):
     """`cid`テーブルにデータを挿入"""
     logger.info("Inserting data into 'cid' table...")
-    with closing(get_db_connection()) as conn:
-        c = conn.cursor()
-        try:
-            c.execute('''
-                INSERT INTO cid (cid, cname, clink)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (cid) DO NOTHING
-            ''', (cid, cname, clink))
-            conn.commit()
-            logger.info("Data inserted into 'cid' table successfully.")
-        except psycopg2.Error as e:
-            logger.error("Error while inserting data into 'cid' table: %s", e)
+    with use_db_connection() as conn:
+        with conn.cursor() as c:
+            try:
+                c.execute('''
+                    INSERT INTO cid (cid, cname, clink)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (cid) DO NOTHING
+                ''', (cid, cname, clink))
+                conn.commit()
+                logger.info("Data inserted into 'cid' table successfully.")
+            except psycopg2.Error as e:
+                logger.error("Error while inserting data into 'cid' table: %s", e)
 
 
 def insert_category_data(contents_data, channel_category):
@@ -207,7 +223,7 @@ def insert_contents_data(video_data, channel_category):
     #     else:
     #         logger.info("Processing stopped due to duplicate IDs.")
     #         return
-    with closing(get_db_connection()) as conn:  # データベース接続
+    with use_db_connection() as conn:  # データベース接続
         with closing(conn.cursor()) as c:  # カーソルのクローズを自動管理
             try:
                 for data in video_data:
@@ -257,9 +273,9 @@ def insert_contents_data(video_data, channel_category):
 def search_content_table():
     """`contents`テーブルを検索"""
     logger.info("Searching data in 'contents' table...")
-    with closing(get_db_connection()) as conn:
+    with use_db_connection() as conn:
         c = conn.cursor()
-        query = 'SELECT * FROM contents LIMIT 5'
+        query = 'SELECT * FROM contents'
         c.execute(query)
         #c.execute("SELECT * FROM contents WHERE id = %s;", ('B-uDfqk20ac',))
         results = c.fetchall()
@@ -301,7 +317,7 @@ def get_channel_name_from_id(id):
 def search_db():
     """データベースのテーブル一覧を表示"""
     logger.info("Fetching list of tables in the database...")
-    with closing(get_db_connection()) as conn:
+    with use_db_connection() as conn:
         c = conn.cursor()
         c.execute("""
             SELECT table_name
@@ -312,19 +328,39 @@ def search_db():
         table_names = [table[0] for table in tables]
         logger.info("Tables found: %s", table_names)
         #print("テーブル一覧:", table_names)
+        return table_names
 
 
-def search_term_in_table(table, term):
-    """`table`テーブルの`term`を検索"""
-    pass
-    # logger.info("Searching data in 'contents' table...")
-    # with closing(get_db_connection()) as conn:
-    #     c = conn.cursor()
-    #     query = 'SELECT * FROM contents'
-    #     c.execute(query)
-    #     results = c.fetchall()
-    #     logger.info("Search completed. Found %d records.", len(results))
-    #     return [[result[0], result[1]] for result in results]
+def search_term_in_table(table, term=None):
+    """`table` テーブルの `term` を検索"""
+    logger.info("Searching data in '%s' table for term '%s'...", table, term)
+
+    # テーブル名のバリデーション（任意の安全策）
+    allowed_tables = {'contents', 'cid', 'category, feedback'}
+    if table not in allowed_tables:
+        logger.error("Invalid table name: %s", table)
+        raise ValueError(f"Invalid table name: {table}")
+
+    with use_db_connection() as conn:
+        with conn.cursor() as c:
+            # 動的にテーブル名を埋め込む
+            query = f"SELECT * FROM {table}"# WHERE cname ILIKE %s OR clink ILIKE %s"
+            c.execute(query)
+            #c.execute(query, (f"%{term}%", f"%{term}%"))
+            results = c.fetchall()
+            logger.info("Search completed. Found %d records.", len(results))
+            return results
+
+def temp_func(tbl_name):
+    with use_db_connection() as conn:
+        with conn.cursor() as c:
+            #query = f"SELECT * FROM {tbl_name}"  # WHERE cname ILIKE %s OR clink ILIKE %s"
+            query = f"SELECT ID FROM {tbl_name} WHERE ID IN ('ewMGrhiWc1E', 'vY8B71_TVLw', '6sFICjN9bPQ', 'hUBAMSuydJI', 'y_ZXOJJFyuA', 'EnZ95vi9RU8', 'TIu4PNw_PTQ', 'XPPl5NDFdMc', 'sYVfBvdc6Xo', 'HKcB-ZrL52Q');"
+            c.execute(query)
+            # c.execute(query, (f"%{term}%", f"%{term}%"))
+            results = c.fetchall()
+            logger.info("Search completed. Found %d records.", len(results))
+            return results
 
 # def find_duplicates(df: pd.DataFrame) -> list:
 #     """重複したIDを検索"""
@@ -338,10 +374,11 @@ def search_term_in_table(table, term):
 #     return duplicates
 
 
-if __name__ == '__main__':
-#     delete_table("cid")
-#     search_db()
-    print(search_content_table())
+# if __name__ == '__main__':
+# #     delete_table("cid")
+#      search_db()
+
+    #print(search_content_table())
 
 # #     create_base_table()
 # #     create_feedback_table()

@@ -10,6 +10,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler()  # 標準出力にログを表示
+        #logging.FileHandler('app.log', encoding='utf-8')  # ファイルにログを書き込む
     ]
 )
 logger = logging.getLogger(__name__)

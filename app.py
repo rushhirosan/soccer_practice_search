@@ -70,19 +70,19 @@ def convert_activities(activities):
 def build_query_with_filters(base_query, filters, params):
     """フィルタに基づいてクエリを構築する補助関数"""
     if filters.get('type_filter'):
-        base_query += " AND category_title = ?"
+        base_query += " AND category_title = %s"
         params.append(filters['type_filter'])
 
     if filters.get('players_filter'):
-        base_query += " AND players = ?"
+        base_query += " AND players = %s"
         params.append(filters['players_filter'])
 
     if filters.get('level_filter'):
-        base_query += " AND level = ?"
+        base_query += " AND level = %s"
         params.append(filters['level_filter'])
 
     if filters.get('channel_filter'):
-        base_query += " AND channel_brand_category = ?"
+        base_query += " AND channel_brand_category = %s"
         params.append(filters['channel_filter'])
 
     return base_query, params
@@ -90,32 +90,133 @@ def build_query_with_filters(base_query, filters, params):
 
 def execute_query(conn, query, params):
     """クエリを実行し、結果を返す"""
-    logger.info(f"Executing query: {query} with params: {params}")
+    logger.info(f"Executing query: {query} with params: {params}")    
+    conn = get_db_connection()
+    cursor = conn.cursor()
     try:
-        return conn.execute(query, params).fetchall()
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+        #print("results", results)
+        return results
     except Exception as e:
         logger.error(f"Error executing query: {e}")
         return []
 
 
+# def safe_query(conn, query, params):
+#     """安全にクエリを実行する関数"""
+#     logger.info(f"Executing safe query: {query} with params: {params}")
+#     query = f"SELECT ID FROM contents WHERE ID IN ('ewMGrhiWc1E', 'vY8B71_TVLw', '6sFICjN9bPQ', 'hUBAMSuydJI', 'y_ZXOJJFyuA', 'EnZ95vi9RU8', 'TIu4PNw_PTQ', 'XPPl5NDFdMc', 'sYVfBvdc6Xo', 'HKcB-ZrL52Q');"
+#     try:
+#         #result = conn.execute(query, params)
+#         result = conn.execute(query)
+#         t = conn.fetchall()
+#         print("RES", result, len(t))
+#         if result is None:
+#             logger.warning("Query returned no results.")
+#             return None
+# 
+#         row = result.fetchone()
+#         print("row", row)
+#         if row is None:
+#             logger.warning("No row found.")
+#             return None
+# 
+#         return row[0]
+# 
+#     except Exception as e:
+#         logger.error(f"Error executing query: {e}")
+#         return None
+
 def get_total_data_by_id(conn, q, ids):
     """IDリストに基づいて総データ数を取得"""
+
+    conn = get_db_connection()
+
     if not ids:
         return 0
 
-    placeholders = ', '.join(['?'] * len(ids))
+    # プレースホルダを作成
+    placeholders = ', '.join(['%s'] * len(ids))
+
+    # qが指定されている場合、titleのLIKE句のパラメータを作成
     q_like = f"%{q}%" if q else None
 
+    # クエリの作成
     query = f'''
         SELECT count(*) FROM contents
         WHERE ID IN ({placeholders})
     '''
+
+    # パラメータをidsとして設定
     params = ids
+
+    # qが指定されている場合、LIKE句を追加
     if q:
-        query += " AND title LIKE ?"
+        query += " AND title LIKE %s"
         params.append(q_like)
 
-    return conn.execute(query, params).fetchone()[0]
+    print("THISIS", query, params)
+
+    cursor = conn.cursor()  # カーソルを取得
+
+    # クエリを実行
+    cursor.execute(query, params)
+
+    # 結果を取得
+    result = cursor.fetchone()  # 1行を取得
+
+    if result:
+        count = result[0]  # count(*)の値
+    else:
+        count = 0
+
+    cursor.close()  # カーソルを閉じる
+
+    return count
+
+
+# def get_total_data_by_id(conn, q, ids):
+#     """IDリストに基づいて総データ数を取得"""
+#     #print("HOIHIOHIOHOIHI", q, ids)
+#
+#     if not ids:
+#         return 0
+#
+#     placeholders = ', '.join(['%s'] * len(ids))
+#     q_like = f"%{q}%" if q else None
+#
+#     query = f'''
+#         SELECT count(*) FROM contents
+#         WHERE ID IN ({placeholders})
+#     '''
+#     params = ids
+#     if q:
+#         query += " AND title LIKE %s"
+#         params.append(q_like)
+#
+#     print("THISIS", query, params)
+#
+#     conn = get_db_connection()
+#     cursor = conn.cursor()
+#
+#     res = cursor.execute(query, params)
+#     print("WWWW", res)
+#
+#     return res
+
+    #result = conn.execute(query, params).fetchone()
+    # if result is not None:
+    #     return result[0]
+    # else:
+    #     return 0  # 該当するレコードがない場合、0を返す
+
+    #return conn.execute(query, params).fetchone()[0]
+    # count = safe_query(conn, query, params)
+    # #print(count)
+    # if count is None:
+    #     logger.info("No data found, count set to 0")
+    #     count = 0
 
 
 def get_data_by_id(conn, q, ids, sort, offset, limit=None):
@@ -123,22 +224,27 @@ def get_data_by_id(conn, q, ids, sort, offset, limit=None):
     if not ids:
         return []
 
-    placeholders = ', '.join(['?'] * len(ids))
+    # PostgreSQL では %s を使う
+    placeholders = ', '.join(['%s'] * len(ids))
     q_like = f"%{q}%" if q else None
 
+    # クエリ構築
     query = f'''
         SELECT * FROM contents
         WHERE ID IN ({placeholders})
     '''
     params = ids
+
     if q:
-        query += " AND title LIKE ?"
+        query += " AND title LIKE %s"
         params.append(q_like)
 
-    query += f" ORDER BY {sort} DESC LIMIT ? OFFSET ?"
+    query += f" ORDER BY {sort} DESC LIMIT %s OFFSET %s"
     params.extend([limit, offset])
 
+    # クエリ実行
     return execute_query(conn, query, params)
+
 
 
 def multi_search_total(conn, q, filters):
@@ -146,10 +252,12 @@ def multi_search_total(conn, q, filters):
     base_query = "SELECT * FROM category WHERE 1=1"
     params = []
     base_query, params = build_query_with_filters(base_query, filters, params)
-    print(base_query, params)
 
     rows = execute_query(conn, base_query, params)
-    ids = [row["ID"] for row in rows]
+    #ids = [row["ID"] for row in rows]
+    #print("rows", rows)
+    ids = [row[0] for row in rows]
+    print(ids)
     return get_total_data_by_id(conn, q, ids)
 
 
@@ -158,10 +266,11 @@ def multi_search(conn, q, filters, sort, offset, limit):
     base_query = "SELECT * FROM category WHERE 1=1"
     params = []
     base_query, params = build_query_with_filters(base_query, filters, params)
-    print("HIHI", base_query, params)
+    #print("HIHI", base_query, params)
 
     rows = execute_query(conn, base_query, params)
-    ids = [row["ID"] for row in rows]
+    #ids = [row["ID"] for row in rows]
+    ids = [row[0] for row in rows]
     return get_data_by_id(conn, q, ids, sort, offset, limit)
 
 
@@ -346,4 +455,4 @@ def index():
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))  # PORT環境変数を使用、無ければ5000
-    app.run(host="0.0.0.0", port=port, debug=False)  # 0.0.0.0で外部アクセスを許可
+    app.run(host="0.0.0.0", port=port, debug=True)  # 0.0.0.0で外部アクセスを許可

@@ -6,3 +6,5 @@ utilities/.env
 utilities/__pycache__/
 tests/__pycache__/
 *.db
+__pycache__/
+reset_env.py
