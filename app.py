@@ -156,8 +156,6 @@ def get_total_data_by_id(conn, q, ids):
         query += " AND title LIKE %s"
         params.append(q_like)
 
-    print("THISIS", query, params)
-
     cursor = conn.cursor()  # カーソルを取得
 
     # クエリを実行
@@ -257,7 +255,6 @@ def multi_search_total(conn, q, filters):
     #ids = [row["ID"] for row in rows]
     #print("rows", rows)
     ids = [row[0] for row in rows]
-    print(ids)
     return get_total_data_by_id(conn, q, ids)
 
 
