@@ -1,6 +1,6 @@
 from utilities.get_videos import get_youtube_video_data
 from utilities.get_channel_id import get_channel_id, get_channel_details
-from utilities.db_access import create_cid_table, get_db_connection, insert_cid_data, create_contents_table, insert_contents_data, create_category_table, search_content_table, insert_category_data
+from utilities.db_access import create_cid_table, get_db_connection, insert_cid_data, create_contents_table, insert_contents_data, create_category_table, search_content_table, insert_category_data, create_feedback_table
 from utilities.update_category_db import update_category
 from flask import Flask
 import os
@@ -81,17 +81,6 @@ if __name__ == '__main__':
             contents_data = update_category(contents)
             insert_category_data(contents_data, c_num)
 
-
-    # channel_id = os.getenv('CHANNEL_ID')
-    #
-    #
-    #
-    # if not channel_id or not api_key:
-    #     logger.error("CHANNEL_ID or API key is missing. Please set it in the .env file.")
-    #     sys.exit(1)  # エラー終了
-    # channels = channel_id.split(",")
-    # for cid in channels:
-    #     # print(cid)
-    #     get_youtube_video_data(cid, api_key, output_file)
-    #     logger.info(cid + "is finished well.")
+        create_feedback_table()
+        logger.info("feedback table created. All processes finished successfully")
 

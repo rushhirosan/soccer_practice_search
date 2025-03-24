@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 
 pool = SimpleConnectionPool(1, 10, dsn=DATABASE_URL)  # 最小1、最大10の接続プール
 
+
 def get_db_connection():
     """リクエストごとに同じ接続を再利用する"""
     if "db" not in g or g.db.closed:
@@ -331,12 +332,12 @@ def search_db():
         return table_names
 
 
-def search_term_in_table(table, term=None):
+def search_term_in_table(table):
     """`table` テーブルの `term` を検索"""
-    logger.info("Searching data in '%s' table for term '%s'...", table, term)
+    #logger.info("Searching data in '%s' table for term '%s'...", table)
 
     # テーブル名のバリデーション（任意の安全策）
-    allowed_tables = {'contents', 'cid', 'category, feedback'}
+    allowed_tables = {'contents', 'cid', 'category', 'feedback'}
     if table not in allowed_tables:
         logger.error("Invalid table name: %s", table)
         raise ValueError(f"Invalid table name: {table}")
